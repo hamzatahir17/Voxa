@@ -1,0 +1,31 @@
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.iws
+/out/
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Log files
+*.log
+
+# Keystore files (SENSITIVE)
+*.jks
+*.keystore
+*.p12
+
+# Google Services (SENSITIVE)
+google-services.json
+
+# Local configuration
+.DS_Store
+.project
+.settings/
+.classpath
+
+# KSP generated files
+build/generated/ksp/
