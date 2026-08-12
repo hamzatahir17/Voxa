@@ -9,7 +9,7 @@ Voxa is a high-performance, immersive voice assistant application built with mod
 - **Lock Screen Alerts:** Custom, high-priority alert system that works directly from the lock screen.
 - **Zero-Jank UI:** Optimized AGSL Shaders (Background, Orb, Waveforms) and centralized audio management for smooth transitions.
 - **Battery Efficient:** Reliable background scheduling using `AlarmManager` and `WorkManager` with smart `WakeLock` handling.
-- **Secure by Design:** Secrets management via `local.properties` to protect API keys.
+
 
 ## 🛠 Tech Stack
 
