@@ -4,15 +4,21 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.viewModelScope
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.generationConfig
+import com.voxa.app.BuildConfig
 import com.voxa.app.VoxaAlarmReceiver
 import com.voxa.app.data.local.VoxaDatabase
 import com.voxa.app.data.local.entity.ItineraryEntity
@@ -86,6 +92,29 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     private val database = VoxaDatabase.getDatabase(application)
     private val itineraryDao = database.itineraryDao()
 
+    private val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(application)
+    private val generativeModel = GenerativeModel(
+        modelName = "gemini-1.5-flash",
+        apiKey = BuildConfig.GEMINI_API_KEY,
+        generationConfig = generationConfig {
+            temperature = 0.1f
+            topK = 1
+            topP = 1f
+            responseMimeType = "application/json"
+        }
+    )
+
+    private val systemPrompt = """
+        You are a scheduling assistant. Extract meeting details from the input text.
+        Return ONLY a JSON object with these keys: 
+        "title" (string), 
+        "date" (string, e.g., "Today", "Tomorrow", "15 Aug"), 
+        "time" (string, e.g., "3:00 PM", "11:30 AM"), 
+        "leadTime" (integer, minutes to alert before, default 15).
+        If something is missing, make a reasonable guess based on the current context.
+        Current time: ${Calendar.getInstance().time}
+    """.trimIndent()
+
     private val notificationsEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("notifications_enabled")
     private val hapticEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("haptic_enabled")
     private val vibrationEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("vibration_enabled")
@@ -97,14 +126,6 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     
     private var countdownJob: kotlinx.coroutines.Job? = null
     private var pendingAlarmId: Int? = null
-
-    private val sampleCommands = listOf(
-        "Schedule a meeting with Sarah for tomorrow at 3 PM",
-        "Set a reminder to buy groceries at 6 PM",
-        "Call the Design Team at 11:30 AM",
-        "Book a flight to New York for Friday morning",
-        "Check my emails for urgent notifications"
-    )
 
     private val suggestions = listOf(
         "Traffic is heavy on I-95. Consider leaving 15 minutes earlier.",
@@ -300,58 +321,94 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     }
 
     fun startListening() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(assistantState = AssistantState.LISTENING, transcription = "", volume = 0.5f)
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
 
-            val volumeJob = launch {
-                var tick = 0f
-                var targetVolume = 0.5f
-                var currentVolume = 0.5f
-                while (true) {
-                    delay(32.milliseconds)
-                    tick += 0.2f
-                    if (Random.nextFloat() > 0.8f) targetVolume = Random.nextFloat() * 0.7f + 0.3f
-                    currentVolume += (targetVolume - currentVolume) * 0.15f
-                    val microPulse = (kotlin.math.sin(tick * 2f) * 0.05f)
-                    _uiState.value = _uiState.value.copy(
-                        volume = (currentVolume + microPulse).coerceIn(0.1f, 1.0f)
-                    )
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                _uiState.value = _uiState.value.copy(assistantState = AssistantState.LISTENING, transcription = "Listening...")
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {
+                // Map dB to 0.1 - 1.0 volume range for the shader
+                val vol = (rmsdB + 2f) / 15f
+                _uiState.value = _uiState.value.copy(volume = vol.coerceIn(0.1f, 1.0f))
+            }
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                _uiState.value = _uiState.value.copy(assistantState = AssistantState.THINKING)
+            }
+            override fun onError(error: Int) {
+                Log.e("VoxaAI", "Speech Error: $error")
+                _uiState.value = _uiState.value.copy(assistantState = AssistantState.ERROR, transcription = "Sorry, I didn't catch that.")
+            }
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    val text = matches[0]
+                    _uiState.value = _uiState.value.copy(transcription = text)
+                    processWithAI(text)
                 }
             }
-
-            val command = sampleCommands.random()
-            val words = command.split(" ")
-            var currentText = ""
-            for (word in words) {
-                delay(Random.nextLong(150, 450).milliseconds)
-                currentText += "$word "
-                _uiState.value = _uiState.value.copy(transcription = currentText.trim())
+            override fun onPartialResults(partialResults: Bundle?) {
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    _uiState.value = _uiState.value.copy(transcription = matches[0])
+                }
             }
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
 
-            volumeJob.cancel()
-            _uiState.value = _uiState.value.copy(assistantState = AssistantState.THINKING, volume = 0f)
-            delay(1500.milliseconds)
-            
-            // Smart testing: Always set a time 2-5 minutes in the future
-            val testCal = Calendar.getInstance()
-            testCal.add(Calendar.MINUTE, 2)
-            val hour = if (testCal.get(Calendar.HOUR_OF_DAY) % 12 == 0) 12 else testCal.get(Calendar.HOUR_OF_DAY) % 12
-            val min = String.format(Locale.getDefault(), "%02d", testCal.get(Calendar.MINUTE))
-            val amPm = if (testCal.get(Calendar.HOUR_OF_DAY) < 12) "AM" else "PM"
-            val futureTime = "$hour:$min $amPm"
+        speechRecognizer.startListening(intent)
+    }
 
-            val hasSarah = command.contains("Sarah", ignoreCase = true)
+    private fun processWithAI(userInput: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(assistantState = AssistantState.THINKING)
+            try {
+                val response = generativeModel.generateContent("$systemPrompt\n\nUser Input: \"$userInput\"")
+                val jsonString = response.text ?: "{}"
+                
+                // Simple manual JSON parsing to avoid extra library dependencies if not needed
+                // Format expected: {"title": "...", "date": "...", "time": "...", "leadTime": 15}
+                val title = extractJsonValue(jsonString, "title")
+                val date = extractJsonValue(jsonString, "date")
+                val time = extractJsonValue(jsonString, "time")
+                val leadTime = extractJsonValue(jsonString, "leadTime").toIntOrNull() ?: 15
 
-            _uiState.value = _uiState.value.copy(
-                assistantState = AssistantState.PROCESSING,
-                pendingActionTitle = if (hasSarah) "Meeting with Sarah" else "New Event: " + command.take(15) + "...",
-                pendingActionDate = "Today",
-                pendingActionTime = futureTime
-            )
-
-            delay(1000.milliseconds)
-            _uiState.value = _uiState.value.copy(assistantState = AssistantState.IDLE)
+                _uiState.value = _uiState.value.copy(
+                    assistantState = AssistantState.PROCESSING,
+                    pendingActionTitle = title,
+                    pendingActionDate = date,
+                    pendingActionTime = time,
+                    pendingLeadTime = leadTime
+                )
+                
+                delay(800.milliseconds)
+                _uiState.value = _uiState.value.copy(assistantState = AssistantState.IDLE)
+            } catch (e: Exception) {
+                Log.e("VoxaAI", "AI Error", e)
+                _uiState.value = _uiState.value.copy(assistantState = AssistantState.ERROR, transcription = "AI Processing failed.")
+            }
         }
+    }
+
+    private fun extractJsonValue(json: String, key: String): String {
+        val pattern = "\"$key\"\\s*:\\s*\"?([^\",}]+)\"?".toRegex()
+        return pattern.find(json)?.groupValues?.get(1)?.trim() ?: ""
+    }
+
+    fun stopListening() {
+        speechRecognizer.stopListening()
+        _uiState.value = _uiState.value.copy(assistantState = AssistantState.IDLE)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        speechRecognizer.destroy()
     }
 
     fun deleteItineraryItem(id: Int) {

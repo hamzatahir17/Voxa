@@ -70,6 +70,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
