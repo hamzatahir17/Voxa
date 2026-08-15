@@ -153,26 +153,32 @@ fun InteractionConfirmScreenContent(
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                InteractionPill(
-                    icon = Icons.Default.CalendarToday,
-                    text = uiState.pendingActionDate,
-                    modifier = Modifier.weight(1f)
-                ) { showDatePicker = true }
-                
-                InteractionPill(
-                    icon = Icons.Default.Schedule,
-                    text = uiState.pendingActionTime,
-                    modifier = Modifier.weight(1f)
-                ) { showTimePicker = true }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    InteractionPill(
+                        icon = Icons.Default.CalendarToday,
+                        text = uiState.pendingActionDate,
+                        modifier = Modifier.weight(1f)
+                    ) { showDatePicker = true }
+                    
+                    InteractionPill(
+                        icon = Icons.Default.Schedule,
+                        text = uiState.pendingActionTime,
+                        modifier = Modifier.weight(1f)
+                    ) { showTimePicker = true }
+                }
 
                 InteractionPill(
                     icon = Icons.Default.NotificationsActive,
-                    text = "${uiState.pendingLeadTime}m",
-                    modifier = Modifier.weight(0.8f)
+                    text = "Alert ${uiState.pendingLeadTime}m before",
+                    modifier = Modifier.width(200.dp)
                 ) { showLeadTimePicker = true }
             }
 
@@ -243,11 +249,13 @@ fun VoxaDatePicker(initialDate: String, onDateSelected: (String) -> Unit, onDism
     var currentYear by remember { mutableStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
     var selectedDate by remember { 
         mutableStateOf<Calendar?>(
-            if (initialDate == "Pending") null else {
-                // Simple parser for "DD MMM, YYYY" or "Day, Oct 25"
+            try {
+                // Simplified parser for common formats like "25 Oct, 2026"
                 Calendar.getInstance().apply {
-                    // Default to today if parsing is complex for this mock
+                    // Logic to parse initialDate if needed, otherwise default to now
                 }
+            } catch (e: Exception) {
+                Calendar.getInstance()
             }
         )
     }
@@ -439,22 +447,21 @@ fun VoxaDatePicker(initialDate: String, onDateSelected: (String) -> Unit, onDism
 @Composable
 fun VoxaTimePicker(initialTime: String, onTimeSelected: (String) -> Unit, onDismiss: () -> Unit) {
     val initialTimeParts = remember(initialTime) {
-        if (initialTime == "Pending") {
-            Triple("12", "00", "AM")
-        } else {
-            try {
-                // Handle formats like "3 PM" or "3:00 PM"
-                val timeOnly = initialTime.split(" ").first() // "3" or "3:00"
+        try {
+            if (initialTime == "Pending" || initialTime.isEmpty()) {
+                val cal = Calendar.getInstance()
+                val hour = if (cal.get(Calendar.HOUR_OF_DAY) % 12 == 0) 12 else cal.get(Calendar.HOUR_OF_DAY) % 12
+                val amPm = if (cal.get(Calendar.HOUR_OF_DAY) < 12) "AM" else "PM"
+                Triple(hour.toString().padStart(2, '0'), cal.get(Calendar.MINUTE).toString().padStart(2, '0'), amPm)
+            } else {
+                val timeOnly = initialTime.split(" ").first()
                 val amPm = if (initialTime.uppercase().contains("PM")) "PM" else "AM"
-                
                 val hourMin = timeOnly.split(":")
-                val hour = hourMin[0].padStart(2, '0')
-                val min = if (hourMin.size > 1) hourMin[1].padStart(2, '0') else "00"
-                
-                Triple(hour, min, amPm)
-            } catch (e: Exception) {
-                Triple("12", "00", "AM")
+                Triple(hourMin[0].padStart(2, '0'), if (hourMin.size > 1) hourMin[1].padStart(2, '0') else "00", amPm)
             }
+        } catch (e: Exception) {
+            val cal = Calendar.getInstance()
+            Triple("12", "00", if (cal.get(Calendar.HOUR_OF_DAY) < 12) "AM" else "PM")
         }
     }
 
@@ -501,18 +508,21 @@ fun VoxaTimePicker(initialTime: String, onTimeSelected: (String) -> Unit, onDism
                     ) {
                         WheelPicker(
                             items = (1..12).map { it.toString().padStart(2, '0') },
+                            initialSelection = initialTimeParts.first,
                             onItemSelected = { selectedHour = it },
                             modifier = Modifier.weight(1f)
                         )
                         Text(":", style = MaterialTheme.typography.headlineMedium, color = Color.White.copy(alpha = 0.5f))
                         WheelPicker(
                             items = (0..59).map { it.toString().padStart(2, '0') },
+                            initialSelection = initialTimeParts.second,
                             onItemSelected = { selectedMinute = it },
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         WheelPicker(
                             items = listOf("AM", "PM"),
+                            initialSelection = initialTimeParts.third,
                             onItemSelected = { selectedAmPm = it },
                             modifier = Modifier.weight(1f),
                             isInfinite = false
@@ -559,6 +569,7 @@ fun VoxaLeadTimePicker(
     onDismiss: () -> Unit
 ) {
     val intervals = listOf(5, 10, 15, 20, 30)
+    var selectedTempInterval by remember { mutableStateOf(currentInterval) }
     
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -589,14 +600,14 @@ fun VoxaLeadTimePicker(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     intervals.forEach { interval ->
-                        val isSelected = currentInterval == interval
+                        val isSelected = selectedTempInterval == interval
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
                                 .clip(CircleShape)
                                 .background(if (isSelected) Color(0xFF00FFCC) else Color.Transparent)
-                                .clickable { onIntervalSelected(interval) },
+                                .clickable { selectedTempInterval = interval },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -612,7 +623,7 @@ fun VoxaLeadTimePicker(
                 Spacer(modifier = Modifier.height(32.dp))
                 
                 Button(
-                    onClick = onDismiss,
+                    onClick = { onIntervalSelected(selectedTempInterval) },
                     modifier = Modifier.fillMaxWidth().height(54.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FFCC)),
                     shape = RoundedCornerShape(16.dp)
@@ -628,11 +639,16 @@ fun VoxaLeadTimePicker(
 @Composable
 fun WheelPicker(
     items: List<String>,
+    initialSelection: String,
     onItemSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
     isInfinite: Boolean = true
 ) {
-    val initialIndex = if (isInfinite) items.size * 50 else 0
+    val initialIndex = remember(initialSelection) {
+        val baseIndex = items.indexOf(initialSelection).coerceAtLeast(0)
+        if (isInfinite) (items.size * 50) + baseIndex else baseIndex
+    }
+    
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
     

@@ -48,12 +48,21 @@ object AlarmUtils {
         )
 
         val eventTime = parseTime(item.time)
-        val triggerTime = eventTime.timeInMillis - (item.leadTimeMins * 60 * 1000L)
+        val leadTimeMillis = item.leadTimeMins * 60 * 1000L
+        val triggerTime = eventTime.timeInMillis - leadTimeMillis
         val now = System.currentTimeMillis()
 
-        if (triggerTime > now) {
-            Log.d("VoxaAlarm", "Scheduling REAL Alarm for ${item.title} at $triggerTime")
-            val info = AlarmManager.AlarmClockInfo(triggerTime, showPendingIntent)
+        // Logic Fix: If lead time has passed but meeting is still in the future, 
+        // trigger the alarm immediately instead of not scheduling at all.
+        val finalTriggerTime = if (triggerTime <= now && eventTime.timeInMillis > now) {
+            now + 1000 // Trigger in 1 second
+        } else {
+            triggerTime
+        }
+
+        if (finalTriggerTime > now) {
+            Log.d("VoxaAlarm", "Scheduling Alarm for ${item.title} at $finalTriggerTime")
+            val info = AlarmManager.AlarmClockInfo(finalTriggerTime, showPendingIntent)
             alarmManager.setAlarmClock(info, pendingIntent)
         }
     }

@@ -44,7 +44,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Pre-warm AGSL Shaders in background to remove Alert screen lag
+        // EARLY LOCK SCREEN CHECK: Set flags before setContent for maximum speed
+        val isAlarm = intent?.getBooleanExtra("ALARM_TRIGGERED", false) ?: false
+        if (isAlarm) {
+            updateLockScreenFlags(true)
+        }
+        
+        // Pre-warm AGSL Shaders
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Thread {
                 VoxaShaderCache.getBackgroundShader()
@@ -53,37 +59,60 @@ class MainActivity : ComponentActivity() {
             }.start()
         }
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-        }
-        
-        @Suppress("DEPRECATION")
-        window.addFlags(
-            android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-            android.view.WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or
-            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-            android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-            android.view.WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-        )
-        
         enableEdgeToEdge()
         
-        // Request Permissions for Background Reliability
+        // Request Permissions
         checkExactAlarmPermission()
         checkOverlayPermission()
         setupBackgroundBackup()
 
         setContent {
             voxaViewModel = viewModel()
+            val uiState by voxaViewModel.uiState.collectAsState()
+
+            // DYNAMIC LOCK SCREEN CONTROL: Only show over lock screen if alert is active
+            LaunchedEffect(uiState.activeAlertItem) {
+                updateLockScreenFlags(uiState.activeAlertItem != null)
+            }
 
             VoxaTheme {
                 LaunchedEffect(intent) {
                     handleAlarmIntent(intent)
                 }
 
-                VoxaApp(voxaViewModel, onCloseApp = { finish() })
+                VoxaApp(voxaViewModel, onCloseApp = { 
+                    updateLockScreenFlags(false) // Cleanup before closing
+                    finish() 
+                })
             }
+        }
+    }
+
+    private fun updateLockScreenFlags(show: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(show)
+            setTurnScreenOn(show)
+        }
+        
+        if (show) {
+            window.addFlags(
+                android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                android.view.WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or
+                android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                val keyguardManager = getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager
+                keyguardManager.requestDismissKeyguard(this, null)
+            }
+        } else {
+            // FULL CLEANUP: Remove all special flags when alarm stops
+            window.clearFlags(
+                android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                android.view.WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or
+                android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
         }
     }
 
@@ -208,6 +237,14 @@ fun VoxaApp(voxaViewModel: VoxaViewModel, onCloseApp: () -> Unit) {
             composable("confirm") {
                 InteractionConfirmScreen(viewModel = voxaViewModel) {
                     voxaViewModel.confirmAction()
+                    navController.navigate("dashboard") {
+                        popUpTo("dashboard") { inclusive = true }
+                    }
+                }
+                
+                // Handle System Back Button to cancel and return to Dashboard
+                androidx.activity.compose.BackHandler {
+                    voxaViewModel.resetState()
                     navController.navigate("dashboard") {
                         popUpTo("dashboard") { inclusive = true }
                     }

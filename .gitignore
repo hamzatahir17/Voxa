@@ -29,3 +29,6 @@ google-services.json
 
 # KSP generated files
 build/generated/ksp/
+
+# Kotlin temporary files
+*.salive

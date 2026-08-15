@@ -1,6 +1,11 @@
 package com.voxa.app.ui.screens
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Build
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,10 +48,42 @@ fun RecordingScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    // Fallback launcher for devices without integrated SpeechRecognizer service
+    val voiceLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val text = data?.get(0) ?: ""
+            if (text.isNotEmpty()) {
+                viewModel.processWithAIExternally(text)
+            }
+        } else {
+            onClose()
+        }
+    }
+
+    LaunchedEffect(uiState.transcription) {
+        if (uiState.transcription == "RECOGNIZER_INTENT_FALLBACK") {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "How can I help?")
+            }
+            try {
+                voiceLauncher.launch(intent)
+            } catch (e: Exception) {
+                viewModel.resetToError("Voice recognition not supported.")
+            }
+        }
+    }
+
     RecordingScreenContent(
         uiState = uiState,
         onTranscriptionComplete = onTranscriptionComplete,
-        onClose = onClose
+        onClose = {
+            viewModel.stopListening()
+            onClose()
+        }
     )
 }
 
@@ -57,28 +94,25 @@ fun RecordingScreenContent(
     onClose: () -> Unit
 ) {
     LaunchedEffect(uiState.assistantState) {
-        if (uiState.assistantState == AssistantState.IDLE && uiState.transcription.isNotEmpty()) {
+        if (uiState.assistantState == AssistantState.IDLE && uiState.transcription.isNotEmpty() && uiState.transcription != "RECOGNIZER_INTENT_FALLBACK") {
             onTranscriptionComplete()
         }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // Full Screen Background Shaders
         VoxaBackgroundShader(state = uiState.assistantState, volume = uiState.volume)
 
-        // Full Screen Voice Orb Glow (Deep behind everything)
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             VoxaVoiceOrbShader(
-                modifier = Modifier.fillMaxSize(), // Covers full screen
+                modifier = Modifier.fillMaxSize(),
                 state = uiState.assistantState,
                 volume = uiState.volume
             )
         }
 
-        // Main UI Overlay - Spread across full screen
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -87,34 +121,18 @@ fun RecordingScreenContent(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header - Top
             InteractionHeader(uiState.assistantState, onClose)
             
             Spacer(modifier = Modifier.height(60.dp))
             
-            // Transcription - Focused Center-Top
             TranscriptionArea(uiState.transcription)
             
             Spacer(modifier = Modifier.weight(1f))
             
-            // Waveform - Opaque focused area
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(MaterialTheme.colorScheme.background) // Opaque background
-                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(32.dp))
-            ) {
-                VoxaWaveformShader(
-                    state = uiState.assistantState,
-                    volume = uiState.volume
-                )
-            }
+            // Middle Waveform removed as requested
             
             Spacer(modifier = Modifier.weight(1f))
             
-            // Controls - Bottom
             InteractionControls(uiState.assistantState, onMicClick = onClose)
             
             Spacer(modifier = Modifier.height(24.dp))
@@ -163,6 +181,8 @@ fun InteractionHeader(state: AssistantState, onClose: () -> Unit) {
 
 @Composable
 fun TranscriptionArea(transcription: String) {
+    if (transcription == "RECOGNIZER_INTENT_FALLBACK") return
+
     val entities = listOf("Sarah", "Asif", "tomorrow", "3 PM", "2 PM", "Friday", "New York")
     
     val annotatedString = buildAnnotatedString {
@@ -173,7 +193,7 @@ fun TranscriptionArea(transcription: String) {
             if (isEntity) {
                 withStyle(style = MaterialTheme.typography.headlineLarge.copy(
                     fontSize = 32.sp,
-                    lineHeight = 40.sp,
+                    lineHeight = 48.sp, // Increased line height to prevent overlapping
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 ).toSpanStyle()) {
@@ -182,7 +202,7 @@ fun TranscriptionArea(transcription: String) {
             } else {
                 withStyle(style = MaterialTheme.typography.headlineLarge.copy(
                     fontSize = 32.sp,
-                    lineHeight = 40.sp,
+                    lineHeight = 48.sp, // Increased line height to prevent overlapping
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 ).toSpanStyle()) {
@@ -195,13 +215,15 @@ fun TranscriptionArea(transcription: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 120.dp),
+            .heightIn(min = 160.dp) // More space for text
+            .padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = annotatedString,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            lineHeight = 48.sp // Explicitly set line height for the whole text block
         )
     }
 }
@@ -210,18 +232,9 @@ fun TranscriptionArea(transcription: String) {
 fun InteractionControls(state: AssistantState, onMicClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceAround,
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(
-            onClick = {},
-            modifier = Modifier
-                .size(60.dp)
-                .background(Color.White.copy(alpha = 0.05f), CircleShape)
-        ) {
-            Icon(Icons.Default.Keyboard, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        
         Surface(
             onClick = onMicClick,
             color = if (state == AssistantState.LISTENING) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
@@ -238,18 +251,8 @@ fun InteractionControls(state: AssistantState, onMicClick: () -> Unit) {
                 )
             }
         }
-        
-        IconButton(
-            onClick = {},
-            modifier = Modifier
-                .size(60.dp)
-                .background(Color.White.copy(alpha = 0.05f), CircleShape)
-        ) {
-            Icon(Icons.Default.Language, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
-
 
 @Preview(showBackground = true)
 @Composable

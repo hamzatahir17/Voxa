@@ -92,27 +92,33 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     private val database = VoxaDatabase.getDatabase(application)
     private val itineraryDao = database.itineraryDao()
 
-    private val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(application)
+    private var speechRecognizer: SpeechRecognizer? = null
     private val generativeModel = GenerativeModel(
-        modelName = "gemini-1.5-flash",
+        modelName = "gemini-3-flash-preview",
         apiKey = BuildConfig.GEMINI_API_KEY,
         generationConfig = generationConfig {
             temperature = 0.1f
             topK = 1
             topP = 1f
-            responseMimeType = "application/json"
         }
     )
 
     private val systemPrompt = """
-        You are a scheduling assistant. Extract meeting details from the input text.
-        Return ONLY a JSON object with these keys: 
-        "title" (string), 
-        "date" (string, e.g., "Today", "Tomorrow", "15 Aug"), 
-        "time" (string, e.g., "3:00 PM", "11:30 AM"), 
-        "leadTime" (integer, minutes to alert before, default 15).
-        If something is missing, make a reasonable guess based on the current context.
-        Current time: ${Calendar.getInstance().time}
+        You are a highly capable scheduling assistant. The user will speak in English, Urdu, or Roman Urdu.
+        Your tasks:
+        1. Translate and Refine: Convert the user's input into a clean, professional English sentence (e.g., "I want to meet Sarah tomorrow at 2" -> "Schedule a meeting with Sarah tomorrow at 2:00 PM").
+        2. Extract Data: Provide a JSON object with:
+           - "refinedText": The clean English version.
+           - "title": A concise title for the event (e.g., "Meeting with Sarah").
+           - "date": Date in "d MMM, yyyy" format.
+           - "time": Time in "hh:mm AM/PM" format.
+           - "leadTime": Alert lead time in minutes (default 15).
+
+        If the user doesn't specify a time or date, use:
+        - Date: "${Calendar.getInstance().get(Calendar.DAY_OF_MONTH)} ${Calendar.getInstance().getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.getDefault())}, ${Calendar.getInstance().get(Calendar.YEAR)}"
+        - Time: "${String.format(Locale.getDefault(), "%02d:%02d %s", if (Calendar.getInstance().get(Calendar.HOUR_OF_DAY) % 12 == 0) 12 else Calendar.getInstance().get(Calendar.HOUR_OF_DAY) % 12, Calendar.getInstance().get(Calendar.MINUTE), if (Calendar.getInstance().get(Calendar.HOUR_OF_DAY) < 12) "AM" else "PM")}"
+
+        Return ONLY the JSON object.
     """.trimIndent()
 
     private val notificationsEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("notifications_enabled")
@@ -211,15 +217,30 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
 
     private fun cancelAlarm(itemId: Int) {
         val alarmManager = getApplication<android.app.Application>().getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(getApplication(), VoxaAlarmReceiver::class.java)
-        val pendingIntent = PendingIntent.getBroadcast(
-            getApplication(),
-            itemId,
-            intent,
-            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-        )
+        val intent = Intent(getApplication(), com.voxa.app.VoxaAlarmService::class.java).apply {
+            action = "ACTION_TRIGGER_ALARM"
+        }
+        
+        val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(
+                getApplication(),
+                itemId,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else {
+            PendingIntent.getService(
+                getApplication(),
+                itemId,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+        
         if (pendingIntent != null) {
             alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+            Log.d("VoxaAlarm", "Alarm cancelled for ID: $itemId")
         }
     }
 
@@ -321,19 +342,32 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     }
 
     fun startListening() {
+        val context = getApplication<android.app.Application>()
+        
+        // Ensure we have RECORD_AUDIO permission
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            _uiState.value = _uiState.value.copy(assistantState = AssistantState.ERROR, transcription = "Mic permission not granted.")
+            return
+        }
+
+        // Integrated approach
+        if (speechRecognizer == null) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        }
+
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         }
 
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 _uiState.value = _uiState.value.copy(assistantState = AssistantState.LISTENING, transcription = "Listening...")
             }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {
-                // Map dB to 0.1 - 1.0 volume range for the shader
                 val vol = (rmsdB + 2f) / 15f
                 _uiState.value = _uiState.value.copy(volume = vol.coerceIn(0.1f, 1.0f))
             }
@@ -342,8 +376,13 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
                 _uiState.value = _uiState.value.copy(assistantState = AssistantState.THINKING)
             }
             override fun onError(error: Int) {
-                Log.e("VoxaAI", "Speech Error: $error")
-                _uiState.value = _uiState.value.copy(assistantState = AssistantState.ERROR, transcription = "Sorry, I didn't catch that.")
+                val errorMessage = when(error) {
+                    SpeechRecognizer.ERROR_NETWORK -> "Network issue."
+                    SpeechRecognizer.ERROR_NO_MATCH -> "Didn't hear anything."
+                    else -> "Speech Error: $error"
+                }
+                Log.e("VoxaAI", errorMessage)
+                _uiState.value = _uiState.value.copy(assistantState = AssistantState.IDLE)
             }
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -362,28 +401,28 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
-        speechRecognizer.startListening(intent)
+        speechRecognizer?.startListening(intent)
     }
 
     private fun processWithAI(userInput: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(assistantState = AssistantState.THINKING)
             try {
-                val response = generativeModel.generateContent("$systemPrompt\n\nUser Input: \"$userInput\"")
+                val response = generativeModel.generateContent("${systemPrompt}\n\nUser Input: \"${userInput}\"")
                 val jsonString = response.text ?: "{}"
                 
-                // Simple manual JSON parsing to avoid extra library dependencies if not needed
-                // Format expected: {"title": "...", "date": "...", "time": "...", "leadTime": 15}
+                val refinedText = extractJsonValue(jsonString, "refinedText")
                 val title = extractJsonValue(jsonString, "title")
                 val date = extractJsonValue(jsonString, "date")
                 val time = extractJsonValue(jsonString, "time")
-                val leadTime = extractJsonValue(jsonString, "leadTime").toIntOrNull() ?: 15
+                val leadTime = extractJsonValue(jsonString, "leadTime").replace(Regex("[^0-9]"), "").toIntOrNull() ?: 15
 
                 _uiState.value = _uiState.value.copy(
                     assistantState = AssistantState.PROCESSING,
-                    pendingActionTitle = title,
-                    pendingActionDate = date,
-                    pendingActionTime = time,
+                    transcription = refinedText.ifEmpty { userInput }, // Proper English translation
+                    pendingActionTitle = title.ifEmpty { "New Meeting" },
+                    pendingActionDate = date.ifEmpty { getCurrentDate() },
+                    pendingActionTime = time.ifEmpty { getCurrentTime() },
                     pendingLeadTime = leadTime
                 )
                 
@@ -396,19 +435,48 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
         }
     }
 
+    private fun getCurrentDate(): String {
+        val cal = Calendar.getInstance()
+        val day = cal.get(Calendar.DAY_OF_MONTH)
+        val month = cal.getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.getDefault())
+        val year = cal.get(Calendar.YEAR)
+        return "$day $month, $year"
+    }
+
+    private fun getCurrentTime(): String {
+        val cal = Calendar.getInstance()
+        val hour = if (cal.get(Calendar.HOUR_OF_DAY) % 12 == 0) 12 else cal.get(Calendar.HOUR_OF_DAY) % 12
+        val min = String.format(Locale.getDefault(), "%02d", cal.get(Calendar.MINUTE))
+        val amPm = if (cal.get(Calendar.HOUR_OF_DAY) < 12) "AM" else "PM"
+        return "$hour:$min $amPm"
+    }
+
     private fun extractJsonValue(json: String, key: String): String {
         val pattern = "\"$key\"\\s*:\\s*\"?([^\",}]+)\"?".toRegex()
         return pattern.find(json)?.groupValues?.get(1)?.trim() ?: ""
     }
 
     fun stopListening() {
-        speechRecognizer.stopListening()
+        speechRecognizer?.stopListening()
         _uiState.value = _uiState.value.copy(assistantState = AssistantState.IDLE)
+    }
+
+    fun processWithAIExternally(text: String) {
+        _uiState.value = _uiState.value.copy(transcription = text)
+        processWithAI(text)
+    }
+
+    fun resetToError(message: String) {
+        _uiState.value = _uiState.value.copy(
+            assistantState = AssistantState.ERROR,
+            transcription = message
+        )
     }
 
     override fun onCleared() {
         super.onCleared()
-        speechRecognizer.destroy()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
     }
 
     fun deleteItineraryItem(id: Int) {
