@@ -176,8 +176,8 @@ fun InteractionConfirmScreenContent(
 
                 InteractionPill(
                     icon = Icons.Default.NotificationsActive,
-                    text = "Alert ${uiState.pendingLeadTime}m before",
-                    modifier = Modifier.width(200.dp)
+                    text = if (uiState.pendingLeadTime == 0) "Alert: On Time" else "Alert ${uiState.pendingLeadTime}m before",
+                    modifier = Modifier.width(220.dp)
                 ) { showLeadTimePicker = true }
             }
 
@@ -567,7 +567,7 @@ fun VoxaLeadTimePicker(
     onIntervalSelected: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val intervals = listOf(5, 10, 15, 20, 30)
+    val intervals = listOf(0, 5, 10, 15, 20, 30)
     var selectedTempInterval by remember { mutableStateOf(currentInterval) }
     
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {

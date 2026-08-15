@@ -27,7 +27,13 @@ class VoxaAlarmService : Service() {
         when (action) {
             "ACTION_TRIGGER_ALARM" -> {
                 val itemId = intent.getIntExtra("EXTRA_ID", -1)
+                val titleFromIntent = intent.getStringExtra("EXTRA_TITLE") ?: "Voxa Alert"
                 
+                // CRITICAL: Call startForeground IMMEDIATELY (within 5s) to prevent crash.
+                // We use the title from the intent as a placeholder.
+                showForegroundNotification(titleFromIntent, itemId)
+                acquireWakeLock()
+
                 // VERIFICATION: Check if this item still exists and is not completed
                 serviceScope.launch {
                     val database = com.voxa.app.data.local.VoxaDatabase.getDatabase(this@VoxaAlarmService)
@@ -39,15 +45,17 @@ class VoxaAlarmService : Service() {
 
                     if (item == null || item.isCompleted) {
                         Log.d("VoxaAlarm", "Ghost alarm detected (ID: $itemId deleted). Stopping service.")
+                        stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     } else {
-                        val title = item.title
-                        Log.d("VoxaAlarm", "Triggering REAL Alarm: $title")
+                        // All good, update notification if title changed in DB
+                        if (item.title != titleFromIntent) {
+                            showForegroundNotification(item.title, itemId)
+                        }
                         
-                        acquireWakeLock()
-                        showForegroundNotification(title, itemId)
+                        Log.d("VoxaAlarm", "Triggering REAL Alarm: ${item.title}")
                         
-                        // HYBRID LAUNCH: Try direct start first (works on 8, 9 and with Overlay permission)
+                        // HYBRID LAUNCH: Try direct start first
                         try {
                             val launchIntent = Intent(this@VoxaAlarmService, MainActivity::class.java).apply {
                                 this.action = "ACTION_TRIGGER_ALARM"
@@ -58,11 +66,11 @@ class VoxaAlarmService : Service() {
                             }
                             this@VoxaAlarmService.startActivity(launchIntent)
                             Log.d("VoxaAlarm", "Direct Activity Start Success")
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             Log.e("VoxaAlarm", "Direct Activity Start Blocked, relying on FullScreenIntent")
                         }
                         
-                        // DELAYED AUDIO
+                        // DELAYED AUDIO: Ensures Activity bypasses lockscreen first
                         delay(500L)
                         startAlarmEffects()
                     }

@@ -47,7 +47,7 @@ data class ItineraryItem(
     val subtitle: String,
     val isCompleted: Boolean = false,
     val isActive: Boolean = false,
-    val leadTimeMins: Int = 15,
+    val leadTimeMins: Int = 0,
 )
 
 data class NotificationItem(
@@ -71,7 +71,7 @@ data class VoxaUiState(
     val notifications: List<NotificationItem> = emptyList(),
     val nextMeetingTitle: String? = null,
     val nextMeetingTime: String? = null,
-    val timerIntervalMins: Int = 15, // Global Default
+    val timerIntervalMins: Int = 0, // Global Default set to On Time
     val isNotificationsEnabled: Boolean = true,
     val isHapticFeedbackEnabled: Boolean = true,
     val isAlarmVibrationEnabled: Boolean = true,
@@ -79,7 +79,7 @@ data class VoxaUiState(
     val pendingActionTitle: String = "",
     val pendingActionDate: String = "",
     val pendingActionTime: String = "",
-    val pendingLeadTime: Int = 15,
+    val pendingLeadTime: Int = 0,
     val assistantSuggestion: String = "Traffic is heavy on I-95. Consider leaving 15 minutes earlier.",
     val activeAlertItem: ItineraryItem? = null,
     val isTriggeredOnLockScreen: Boolean = false
@@ -110,7 +110,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
            - "title": A concise title for the event (e.g., "Meeting with Sarah").
            - "date": Date in "d MMM, yyyy" format.
            - "time": Time in "hh:mm AM/PM" format.
-           - "leadTime": Alert lead time in minutes (default 15).
+           - "leadTime": Alert lead time in minutes (default 0).
 
         If the user doesn't specify a time or date, use:
         - Date: "${Calendar.getInstance().get(Calendar.DAY_OF_MONTH)} ${Calendar.getInstance().getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.getDefault())}, ${Calendar.getInstance().get(Calendar.YEAR)}"
@@ -420,7 +420,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
                 val title = extractJsonValue(jsonString, "title")
                 val date = extractJsonValue(jsonString, "date")
                 val time = extractJsonValue(jsonString, "time")
-                val leadTime = extractJsonValue(jsonString, "leadTime").replace(Regex("[^0-9]"), "").toIntOrNull() ?: 15
+                val leadTime = extractJsonValue(jsonString, "leadTime").replace(Regex("[^0-9]"), "").toIntOrNull() ?: 0
 
                 _uiState.value = _uiState.value.copy(
                     assistantState = AssistantState.PROCESSING,
