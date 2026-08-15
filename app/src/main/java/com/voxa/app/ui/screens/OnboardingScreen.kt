@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -17,18 +18,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import coil3.compose.AsyncImage
+import com.voxa.app.R
 import com.voxa.app.ui.components.VoxaBackgroundShader
 import com.voxa.app.ui.theme.VoxaTheme
 import com.voxa.app.ui.viewmodel.VoxaViewModel
@@ -100,7 +101,7 @@ fun LogoSection() {
     val infiniteTransition = rememberInfiniteTransition(label = "logo_pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = 1.05f,
+        targetValue = 1.15f,
         animationSpec = infiniteRepeatable(
             animation = tween(2000, easing = EaseInOutSine),
             repeatMode = RepeatMode.Reverse
@@ -114,18 +115,8 @@ fun LogoSection() {
             .scale(scale),
         contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(200.dp)
-                .blur(40.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                    shape = CircleShape
-                )
-        )
-
-        AsyncImage(
-            model = "https://lh3.googleusercontent.com/aida-public/AB6AXuArypJJjndzEeMxTk3NL2blt9m-iRsi91D5TurlFUnJpdMbTvud9b13i5e_CkdRjYRnga2E_JN6YPeOueP56ZkKbLARchrlzRo_5yvfkFBBYlWazC-IlavFXoxi9cr96FmB1Ov4n_K1GBcnrSq-jFozZjHNKFAs2jQLpKpN4CdIW0Am90owBG5v5m7jP167dSq9UGc8NjImwXAvglYkbyuMMEg1EHlcXAzaOIe3vdJU7Ix01PYPy5SiYQ",
+        Image(
+            painter = painterResource(id = R.drawable.logo),
             contentDescription = "Voxa AI Logo",
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Fit

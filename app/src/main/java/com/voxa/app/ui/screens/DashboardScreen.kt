@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -414,22 +415,90 @@ fun DashboardBottomNav(
                 
                 Spacer(modifier = Modifier.width(12.dp))
                 
-                // Floating Action Button Style Trigger
-                Surface(
-                    onClick = onTriggerAssistant,
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = CircleShape,
-                    modifier = Modifier.size(46.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.GraphicEq,
-                            contentDescription = "Trigger Assistant",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
+                // --- ADVANCED LIVE MIC BUTTON ---
+                Box(contentAlignment = Alignment.Center) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
+                    
+                    // Multi-layered breathing glow
+                    val glowScale by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 1.6f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1500, easing = EaseInOutSine),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "scale"
+                    )
+                    
+                    val glowAlpha by infiniteTransition.animateFloat(
+                        initialValue = 0.6f,
+                        targetValue = 0.1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1500, easing = EaseInOutSine),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "alpha"
+                    )
+
+                    // Outer soft glow
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .scale(glowScale)
+                            .blur(10.dp)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = glowAlpha * 0.5f), CircleShape)
+                    )
+
+                    // Inner sharp pulse
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .scale(1f + (glowScale - 1f) * 0.4f)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = glowAlpha), CircleShape)
+                    )
+
+                    // Main Button Surface
+                    Surface(
+                        onClick = onTriggerAssistant,
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = CircleShape,
+                        modifier = Modifier.size(46.dp),
+                        shadowElevation = 12.dp
+                    ) {
+                        // --- ANIMATED INNER BARS ---
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            repeat(3) { index ->
+                                val barScale by infiniteTransition.animateFloat(
+                                    initialValue = 0.3f,
+                                    targetValue = 1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(
+                                            durationMillis = 600,
+                                            delayMillis = index * 150,
+                                            easing = EaseInOutSine
+                                        ),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "bar_$index"
+                                )
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .padding(horizontal = 1.5.dp)
+                                        .width(3.dp)
+                                        .height(18.dp)
+                                        .scale(scaleX = 1f, scaleY = barScale)
+                                        .background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(2.dp))
+                                )
+                            }
+                        }
                     }
                 }
+                // --- END ADVANCED MIC ---
 
                 Spacer(modifier = Modifier.width(12.dp))
 

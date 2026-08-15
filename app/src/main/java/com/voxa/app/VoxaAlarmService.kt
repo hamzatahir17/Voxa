@@ -11,11 +11,14 @@ import android.media.RingtoneManager
 import android.os.*
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.*
 
 class VoxaAlarmService : Service() {
     private var vibrator: Vibrator? = null
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
@@ -26,42 +29,49 @@ class VoxaAlarmService : Service() {
                 val itemId = intent.getIntExtra("EXTRA_ID", -1)
                 
                 // VERIFICATION: Check if this item still exists and is not completed
-                val database = com.voxa.app.data.local.VoxaDatabase.getDatabase(this)
-                val dao = database.itineraryDao()
-                
-                // Run on a background thread to prevent blocking main
-                Thread {
-                    val item = dao.getAllItemsSync().find { it.id == itemId }
+                serviceScope.launch {
+                    val database = com.voxa.app.data.local.VoxaDatabase.getDatabase(this@VoxaAlarmService)
+                    val dao = database.itineraryDao()
+                    
+                    val item = withContext(Dispatchers.IO) {
+                        dao.getItemByIdSync(itemId)
+                    }
+
                     if (item == null || item.isCompleted) {
                         Log.d("VoxaAlarm", "Ghost alarm detected (ID: $itemId deleted). Stopping service.")
                         stopSelf()
                     } else {
-                        // All good, continue with alarm
                         val title = item.title
                         Log.d("VoxaAlarm", "Triggering REAL Alarm: $title")
                         
-                        Handler(Looper.getMainLooper()).post {
-                            acquireWakeLock()
-                            showForegroundNotification(title, itemId)
-                            
-                            // DELAYED AUDIO: We wait 500ms before starting sound
-                            // This ensures the Activity has time to bypass the lockscreen
-                            Handler(Looper.getMainLooper()).postDelayed({
-                                startAlarmEffects()
-                            }, 500)
+                        acquireWakeLock()
+                        showForegroundNotification(title, itemId)
+                        
+                        // HYBRID LAUNCH: Try direct start first (works on 8, 9 and with Overlay permission)
+                        try {
+                            val launchIntent = Intent(this@VoxaAlarmService, MainActivity::class.java).apply {
+                                this.action = "ACTION_TRIGGER_ALARM"
+                                this.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                this.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                                this.putExtra("ALARM_TRIGGERED", true)
+                                this.putExtra("ALARM_ITEM_ID", itemId)
+                            }
+                            this@VoxaAlarmService.startActivity(launchIntent)
+                            Log.d("VoxaAlarm", "Direct Activity Start Success")
+                        } catch (e: Exception) {
+                            Log.e("VoxaAlarm", "Direct Activity Start Blocked, relying on FullScreenIntent")
                         }
+                        
+                        // DELAYED AUDIO
+                        delay(500L)
+                        startAlarmEffects()
                     }
-                }.start()
+                }
             }
             "ACTION_STOP_ALARM" -> {
                 Log.d("VoxaAlarm", "Stopping Alarm Effects")
                 stopAlarmEffects()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                } else {
-                    @Suppress("DEPRECATION")
-                    stopForeground(true)
-                }
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
             "ACTION_RESCHEDULE_ALARMS" -> {
@@ -157,12 +167,7 @@ class VoxaAlarmService : Service() {
                 Log.e("VoxaAlarm", "Reschedule failed", e)
             } finally {
                 Handler(Looper.getMainLooper()).post {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        stopForeground(true)
-                    }
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
             }
@@ -206,11 +211,12 @@ class VoxaAlarmService : Service() {
             .setContentText("Ongoing Meeting Alert")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setFullScreenIntent(fullScreenPendingIntent, true) // Force popup
+            .setFullScreenIntent(fullScreenPendingIntent, true) // Critical: High priority pop
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
-            .setSilent(true) // We use our own MediaPlayer
+            .setSilent(true) 
             .setAutoCancel(false)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE) // Show instantly
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -230,7 +236,7 @@ class VoxaAlarmService : Service() {
         // Cleanup existing player if any to prevent "unhandled events"
         stopAlarmEffects()
 
-        // Start Vibration - Can stay on Main as it's just a system service call
+        // Start Vibration
         vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val vibratorManager = getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager
             vibratorManager.defaultVibrator
@@ -247,8 +253,8 @@ class VoxaAlarmService : Service() {
             vibrator?.vibrate(pattern, 0)
         }
 
-        // Start Sound - MOVING TO BACKGROUND THREAD to prevent UI Jank (Disk I/O)
-        Thread {
+        // Start Sound - Using Coroutines for better resource management
+        serviceScope.launch(Dispatchers.IO) {
             try {
                 val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 val player = MediaPlayer().apply {
@@ -262,23 +268,25 @@ class VoxaAlarmService : Service() {
                         )
                     }
                     isLooping = true
-                    prepare() // Sync prepare is fine on background thread
+                    prepare()
                 }
                 
-                // Synchronize setting the global reference
-                synchronized(this) {
-                    mediaPlayer = player
-                    player.start()
+                withContext(Dispatchers.Main) {
+                    synchronized(this@VoxaAlarmService) {
+                        mediaPlayer = player
+                        player.start()
+                    }
+                    Log.d("VoxaAlarm", "Alarm sound started from background thread")
                 }
-                Log.d("VoxaAlarm", "Alarm sound started from background thread")
             } catch (e: Exception) {
                 Log.e("VoxaAlarm", "Failed to play alarm sound", e)
             }
-        }.start()
+        }
     }
 
     override fun onDestroy() {
         Log.d("VoxaAlarm", "Foreground Service Destroyed")
+        serviceScope.cancel() // Stop any pending DB checks or delays
         stopAlarmEffects()
         releaseWakeLock()
         super.onDestroy()

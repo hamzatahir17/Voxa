@@ -38,6 +38,9 @@ import com.voxa.app.ui.theme.VoxaTheme
 import com.voxa.app.ui.viewmodel.VoxaViewModel
 import com.voxa.app.ui.components.VoxaShaderCache
 
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.*
+
 class MainActivity : ComponentActivity() {
     private lateinit var voxaViewModel: VoxaViewModel
 
@@ -50,13 +53,14 @@ class MainActivity : ComponentActivity() {
             updateLockScreenFlags(true)
         }
         
-        // Pre-warm AGSL Shaders
+        // Pre-warm AGSL Shaders in background with low priority
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Thread {
+            lifecycleScope.launch(Dispatchers.Default) {
+                yield() // Yield to more important startup tasks
                 VoxaShaderCache.getBackgroundShader()
                 VoxaShaderCache.getOrbShader()
                 VoxaShaderCache.getWaveformShader()
-            }.start()
+            }
         }
         
         enableEdgeToEdge()
@@ -64,7 +68,12 @@ class MainActivity : ComponentActivity() {
         // Request Permissions
         checkExactAlarmPermission()
         checkOverlayPermission()
-        setupBackgroundBackup()
+        
+        // Defer background backup to reduce startup jank
+        lifecycleScope.launch(Dispatchers.IO) {
+            delay(3000L) // Wait 3 seconds after start
+            setupBackgroundBackup()
+        }
 
         setContent {
             voxaViewModel = viewModel()
@@ -119,6 +128,13 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        
+        // Force pop to front
+        val isAlarm = intent.getBooleanExtra("ALARM_TRIGGERED", false)
+        if (isAlarm) {
+            updateLockScreenFlags(true)
+        }
+        
         handleAlarmIntent(intent)
     }
 
@@ -146,16 +162,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkOverlayPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.canDrawOverlays(this)) {
-                try {
-                    val intent = Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:$packageName")
-                    )
-                    startActivity(intent)
-                } catch (e: Exception) {}
-            }
+        if (!Settings.canDrawOverlays(this)) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            } catch (_: Exception) {}
         }
     }
 

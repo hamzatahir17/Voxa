@@ -21,7 +21,10 @@ abstract class VoxaDatabase : RoomDatabase() {
                     context.applicationContext,
                     VoxaDatabase::class.java,
                     "voxa_database"
-                ).fallbackToDestructiveMigration().build()
+                )
+                .setJournalMode(JournalMode.TRUNCATE) // Reduces temp files and potential leaks
+                .fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }

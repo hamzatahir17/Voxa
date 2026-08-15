@@ -6,20 +6,17 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
 import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.viewModelScope
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.generationConfig
 import com.voxa.app.BuildConfig
-import com.voxa.app.VoxaAlarmReceiver
 import com.voxa.app.data.local.VoxaDatabase
 import com.voxa.app.data.local.entity.ItineraryEntity
 import kotlinx.coroutines.delay
@@ -27,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -132,6 +130,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     
     private var countdownJob: kotlinx.coroutines.Job? = null
     private var pendingAlarmId: Int? = null
+    private val scheduledAlarmIds = mutableSetOf<Int>()
 
     private val suggestions = listOf(
         "Traffic is heavy on I-95. Consider leaving 15 minutes earlier.",
@@ -166,8 +165,10 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
 
             // Load Itinerary from Room
             launch {
-                itineraryDao.getAllItems().collectLatest { entities ->
-                    val items = entities.map { entity ->
+                itineraryDao.getAllItems()
+                    .distinctUntilChanged() // Prevents processing if data hasn't changed
+                    .collectLatest { entities ->
+                        val items = entities.map { entity ->
                         ItineraryItem(
                             id = entity.id,
                             time = entity.time,
@@ -195,7 +196,8 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
 
                         // Re-schedule future alarms only if app is NOT in alert mode
                         if (_uiState.value.activeAlertItem == null) {
-                            items.filter { !it.isCompleted }.forEach { scheduleAlarm(it) }
+                            items.filter { !it.isCompleted && !scheduledAlarmIds.contains(it.id) }
+                                 .forEach { scheduleAlarm(it) }
                         }
                     }
                 }
@@ -204,6 +206,8 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     }
 
     private fun scheduleAlarm(item: ItineraryItem) {
+        // Prevent redundant scheduling for the same item in the same session
+        // unless it's a new or modified item.
         val entity = ItineraryEntity(
             id = item.id,
             time = item.time,
@@ -213,6 +217,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
             leadTimeMins = item.leadTimeMins
         )
         com.voxa.app.AlarmUtils.scheduleAlarm(getApplication(), entity)
+        scheduledAlarmIds.add(item.id)
     }
 
     private fun cancelAlarm(itemId: Int) {
@@ -318,7 +323,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
             cal.set(Calendar.MINUTE, min)
             cal.set(Calendar.SECOND, 0)
             cal.set(Calendar.MILLISECOND, 0)
-        } catch (e: Exception) {}
+        } catch (_: Exception) {}
         return cal
     }
 
@@ -408,7 +413,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(assistantState = AssistantState.THINKING)
             try {
-                val response = generativeModel.generateContent("${systemPrompt}\n\nUser Input: \"${userInput}\"")
+                val response = generativeModel.generateContent("$systemPrompt\n\nUser Input: \"$userInput\"")
                 val jsonString = response.text ?: "{}"
                 
                 val refinedText = extractJsonValue(jsonString, "refinedText")
@@ -482,6 +487,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     fun deleteItineraryItem(id: Int) {
         viewModelScope.launch {
             itineraryDao.deleteItemById(id)
+            scheduledAlarmIds.remove(id)
             cancelAlarm(id)
         }
     }
@@ -493,7 +499,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
 
     fun triggerAlarmFromIntent(itemId: Int, isLocked: Boolean = false) {
         Log.d("VoxaAlarm", "Trigger request received for ID: $itemId, Locked: $isLocked")
-        val item = _uiState.value.itinerary.find { it.id == itemId }
+        val item = uiState.value.itinerary.find { it.id == itemId }
         if (item != null && !item.isCompleted) {
             _uiState.value = _uiState.value.copy(
                 activeAlertItem = item,

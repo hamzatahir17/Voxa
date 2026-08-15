@@ -23,4 +23,7 @@ interface ItineraryDao {
 
     @Query("DELETE FROM itinerary_items WHERE id = :itemId")
     suspend fun deleteItemById(itemId: Int)
+
+    @Query("SELECT * FROM itinerary_items WHERE id = :itemId LIMIT 1")
+    fun getItemByIdSync(itemId: Int): ItineraryEntity?
 }

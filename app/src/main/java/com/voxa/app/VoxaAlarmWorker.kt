@@ -21,11 +21,15 @@ class VoxaAlarmWorker(
             
             val items = dao.getAllItemsSync()
             val now = System.currentTimeMillis()
+            val safetyBufferMillis = 2 * 60 * 1000L // 2 minutes
             
             items.filter { !it.isCompleted }.forEach { item ->
-                // Only reschedule if it's actually in the future
                 val eventTime = AlarmUtils.parseTime(item.time)
-                if (eventTime.timeInMillis > now) {
+                val triggerTime = eventTime.timeInMillis - (item.leadTimeMins * 60 * 1000L)
+                
+                // Only reschedule if the trigger time is at least 2 minutes in the future.
+                // If it's sooner, let the existing AlarmManager handle it to avoid double triggers.
+                if (triggerTime > (now + safetyBufferMillis)) {
                     AlarmUtils.scheduleAlarm(applicationContext, item)
                 }
             }

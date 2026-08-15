@@ -1,27 +1,12 @@
 package com.voxa.app
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.media.RingtoneManager
 import android.os.Build
-import android.os.PowerManager
 import android.util.Log
-import androidx.core.app.NotificationCompat
 
 class VoxaAlarmReceiver : BroadcastReceiver() {
-    companion object {
-        // Obsolete WakeLock removed as it's now handled by VoxaAlarmService
-        fun releaseWakeLock() {
-            // No-op for backward compatibility if needed, can be removed fully later
-            Log.d("VoxaAlarm", "Obsolete WakeLock release called")
-        }
-    }
-
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
         Log.d("VoxaAlarm", "Receiver triggered with action: $action")
