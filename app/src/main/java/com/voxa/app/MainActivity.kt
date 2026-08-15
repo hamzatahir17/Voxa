@@ -9,6 +9,7 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -45,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var voxaViewModel: VoxaViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         
         // EARLY LOCK SCREEN CHECK: Set flags before setContent for maximum speed
@@ -71,13 +73,18 @@ class MainActivity : ComponentActivity() {
         
         // Defer background backup to reduce startup jank
         lifecycleScope.launch(Dispatchers.IO) {
-            delay(3000L) // Wait 3 seconds after start
+            delay(3000) // Wait 3 seconds after start
             setupBackgroundBackup()
         }
 
         setContent {
             voxaViewModel = viewModel()
             val uiState by voxaViewModel.uiState.collectAsState()
+
+            // Keep splash screen until data is loaded
+            splashScreen.setKeepOnScreenCondition {
+                !uiState.isDataLoaded
+            }
 
             // DYNAMIC LOCK SCREEN CONTROL: Only show over lock screen if alert is active
             LaunchedEffect(uiState.activeAlertItem) {

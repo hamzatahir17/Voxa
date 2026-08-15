@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.Voxa" parent="android:Theme.Material.Light.NoActionBar" />
-
-    <!-- Native Splash Screen Theme -->
     <style name="Theme.Voxa.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">#121317</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/logo</item>
