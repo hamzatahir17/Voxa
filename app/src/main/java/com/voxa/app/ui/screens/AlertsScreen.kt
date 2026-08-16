@@ -51,16 +51,41 @@ fun AlertsScreen(
     onSnooze: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val alertItem = uiState.activeAlertItem
     val context = LocalContext.current
     
     // UI thread optimized: AlertsScreen no longer manages audio/vibration directly.
-    // This removes the 80+ skipped frames during transition.
     LaunchedEffect(Unit) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         nm.cancelAll() 
     }
 
+    AlertsScreenContent(
+        alertItem = uiState.activeAlertItem,
+        snoozeLength = uiState.snoozeLengthMins,
+        onDismiss = {
+            val intent = Intent(context, VoxaAlarmService::class.java).apply {
+                action = "ACTION_STOP_ALARM"
+            }
+            context.startService(intent)
+            onDismiss()
+        },
+        onSnooze = {
+            val intent = Intent(context, VoxaAlarmService::class.java).apply {
+                action = "ACTION_STOP_ALARM"
+            }
+            context.startService(intent)
+            onSnooze()
+        }
+    )
+}
+
+@Composable
+fun AlertsScreenContent(
+    alertItem: ItineraryItem?,
+    snoozeLength: Int,
+    onDismiss: () -> Unit,
+    onSnooze: () -> Unit
+) {
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(modifier = Modifier.fillMaxSize()) {
             VoxaWaveformShader()
@@ -78,23 +103,9 @@ fun AlertsScreen(
             AlertHeader()
             AlertInfo(alertItem)
             AlertActions(
-                onDismiss = {
-                    // Send Intent to stop service audio
-                    val intent = Intent(context, VoxaAlarmService::class.java).apply {
-                        action = "ACTION_STOP_ALARM"
-                    }
-                    context.startService(intent)
-                    onDismiss()
-                },
-                onSnooze = {
-                    // Send Intent to stop service audio
-                    val intent = Intent(context, VoxaAlarmService::class.java).apply {
-                        action = "ACTION_STOP_ALARM"
-                    }
-                    context.startService(intent)
-                    onSnooze()
-                },
-                snoozeLength = uiState.snoozeLengthMins
+                onDismiss = onDismiss,
+                onSnooze = onSnooze,
+                snoozeLength = snoozeLength
             )
         }
     }
@@ -251,7 +262,7 @@ fun DismissButton(onDismiss: () -> Unit) {
 
 @Composable
 fun SnoozeSlider(onSnooze: () -> Unit, snoozeLength: Int) {
-    var dragX by remember { mutableStateOf(0f) }
+    var dragX by remember { mutableFloatStateOf(0f) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     
     BoxWithConstraints(
@@ -261,7 +272,8 @@ fun SnoozeSlider(onSnooze: () -> Unit, snoozeLength: Int) {
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
             .padding(4.dp)
     ) {
-        val maxDragPx = with(density) { (maxWidth - 56.dp).toPx() }
+        val scope = this
+        val maxDragPx = with(density) { (scope.maxWidth - 56.dp).toPx() }
         
         val animatedDragX by animateFloatAsState(
             targetValue = dragX,
@@ -289,7 +301,7 @@ fun SnoozeSlider(onSnooze: () -> Unit, snoozeLength: Int) {
                 .pointerInput(maxDragPx) {
                     detectDragGestures(
                         onDragEnd = {
-                            if (dragX >= maxDragPx * 0.9f) {
+                            if (dragX >= (maxDragPx * 0.9f)) {
                                 onSnooze()
                             }
                             dragX = 0f
@@ -320,8 +332,17 @@ fun SnoozeSlider(onSnooze: () -> Unit, snoozeLength: Int) {
 @Composable
 fun AlertsScreenPreview() {
     VoxaTheme {
-        AlertsScreen(
-            viewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+        AlertsScreenContent(
+            alertItem = ItineraryItem(
+                id = 1,
+                time = "10:30 AM",
+                title = "Design Sync",
+                subtitle = "Discuss new UI shaders",
+                isCompleted = false,
+                isActive = true,
+                leadTimeMins = 0
+            ),
+            snoozeLength = 10,
             onDismiss = {},
             onSnooze = {}
         )

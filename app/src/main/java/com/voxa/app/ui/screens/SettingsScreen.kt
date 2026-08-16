@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.voxa.app.ui.components.VoxaBackgroundShader
@@ -101,6 +103,8 @@ fun SettingsScreenContent(
     onRequestIgnoreBatteryOptimization: () -> Unit,
     onRequestExactAlarmPermission: () -> Unit
 ) {
+    var showAutoLaunchInstructions by remember { mutableStateOf(false) }
+
     Scaffold(
         bottomBar = {
             DashboardBottomNav(
@@ -162,6 +166,19 @@ fun SettingsScreenContent(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             )
                         }
+
+                        // Auto-Launch Instruction Item
+                        SettingsItem(
+                            icon = Icons.Default.RocketLaunch,
+                            title = "Auto-Launch Guide",
+                            subtitle = "How to enable background alarms manually",
+                            onClick = { showAutoLaunchInstructions = true },
+                            iconColor = Color(0xFFFFB74D)
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 64.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        )
 
                         SettingsToggleItem(
                             icon = Icons.Default.Notifications,
@@ -238,6 +255,93 @@ fun SettingsScreenContent(
                 }
             }
         }
+
+        if (showAutoLaunchInstructions) {
+            AutoLaunchInstructionsDialog(onDismiss = { showAutoLaunchInstructions = false })
+        }
+    }
+}
+
+@Composable
+fun AutoLaunchInstructionsDialog(onDismiss: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = Color(0xFF1A1C1E),
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Default.RocketLaunch,
+                    contentDescription = null,
+                    tint = Color(0xFFFFB74D),
+                    modifier = Modifier.size(48.dp)
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Enable Auto-Launch",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Text(
+                    text = "To ensure Voxa can wake up your phone for alarms, please follow these steps:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                InstructionStep(number = "1", text = "Open phone Settings")
+                InstructionStep(number = "2", text = "Go to Apps / App Management")
+                InstructionStep(number = "3", text = "Select Voxa from the list")
+                InstructionStep(number = "4", text = "Find 'Auto-start' or 'App Launch'")
+                InstructionStep(number = "5", text = "Enable it for Voxa")
+                
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("GOT IT", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun InstructionStep(number: String, text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(24.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(text = number, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(text = text, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
     }
 }
 
@@ -398,6 +502,31 @@ fun SettingsToggleItem(
                 uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun SettingsScreenPreview() {
+    com.voxa.app.ui.theme.VoxaTheme {
+        SettingsScreenContent(
+            uiState = VoxaUiState(
+                isNotificationsEnabled = true,
+                isHapticFeedbackEnabled = true,
+                isAlarmVibrationEnabled = false,
+                snoozeLengthMins = 10
+            ),
+            onTriggerAssistant = {},
+            onNavigateToDashboard = {},
+            onToggleNotifications = {},
+            onToggleHapticFeedback = {},
+            onToggleAlarmVibration = {},
+            onUpdateSnoozeLength = {},
+            isBatteryOptimizationIgnored = false,
+            canScheduleExactAlarms = true,
+            onRequestIgnoreBatteryOptimization = {},
+            onRequestExactAlarmPermission = {}
         )
     }
 }

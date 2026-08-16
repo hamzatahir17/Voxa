@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 data class ItineraryEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val time: String,
+    val date: String = "",
     val title: String,
     val subtitle: String,
     val isCompleted: Boolean,

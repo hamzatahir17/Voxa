@@ -43,6 +43,7 @@ enum class AssistantState {
 data class ItineraryItem(
     val id: Int,
     val time: String,
+    val date: String = "",
     val title: String,
     val subtitle: String,
     val isCompleted: Boolean = false,
@@ -71,6 +72,7 @@ data class VoxaUiState(
     val notifications: List<NotificationItem> = emptyList(),
     val nextMeetingTitle: String? = null,
     val nextMeetingTime: String? = null,
+    val nextMeetingDate: String? = null,
     val timerIntervalMins: Int = 0, // Global Default set to On Time
     val isNotificationsEnabled: Boolean = true,
     val isHapticFeedbackEnabled: Boolean = true,
@@ -92,7 +94,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
 
     private var speechRecognizer: SpeechRecognizer? = null
     private val generativeModel = GenerativeModel(
-        modelName = "gemini-3-flash-preview",
+        modelName = "gemini-3.1-flash-lite",
         apiKey = BuildConfig.GEMINI_API_KEY,
         generationConfig = generationConfig {
             temperature = 0.1f
@@ -172,6 +174,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
                         ItineraryItem(
                             id = entity.id,
                             time = entity.time,
+                            date = entity.date,
                             title = entity.title,
                             subtitle = entity.subtitle,
                             isCompleted = entity.isCompleted,
@@ -211,6 +214,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
         val entity = ItineraryEntity(
             id = item.id,
             time = item.time,
+            date = item.date,
             title = item.title,
             subtitle = item.subtitle,
             isCompleted = item.isCompleted,
@@ -250,13 +254,13 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
     }
 
     private fun saveSettings() {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             dataStore.edit { prefs ->
-                prefs[notificationsEnabledKey] = _uiState.value.isNotificationsEnabled
-                prefs[hapticEnabledKey] = _uiState.value.isHapticFeedbackEnabled
-                prefs[vibrationEnabledKey] = _uiState.value.isAlarmVibrationEnabled
-                prefs[snoozeLengthKey] = _uiState.value.snoozeLengthMins
-                prefs[onboardingCompletedKey] = _uiState.value.isOnboardingCompleted
+                prefs[notificationsEnabledKey] = uiState.value.isNotificationsEnabled
+                prefs[hapticEnabledKey] = uiState.value.isHapticFeedbackEnabled
+                prefs[vibrationEnabledKey] = uiState.value.isAlarmVibrationEnabled
+                prefs[snoozeLengthKey] = uiState.value.snoozeLengthMins
+                prefs[onboardingCompletedKey] = uiState.value.isOnboardingCompleted
             }
         }
     }
@@ -519,6 +523,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
                 val updated = ItineraryEntity(
                     id = currentAlert.id,
                     time = currentAlert.time,
+                    date = currentAlert.date,
                     title = currentAlert.title,
                     subtitle = currentAlert.subtitle,
                     isCompleted = true,
@@ -550,6 +555,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
                 val snoozedEntity = ItineraryEntity(
                     id = currentAlert.id,
                     time = newTime,
+                    date = currentAlert.date,
                     title = currentAlert.title,
                     subtitle = currentAlert.subtitle,
                     isCompleted = false,
@@ -603,6 +609,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
         viewModelScope.launch {
             val newItem = ItineraryEntity(
                 time = _uiState.value.pendingActionTime,
+                date = _uiState.value.pendingActionDate,
                 title = _uiState.value.pendingActionTitle,
                 subtitle = "Scheduled via Voxa",
                 isCompleted = false,
@@ -614,6 +621,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
             val scheduledItem = ItineraryItem(
                 id = newId,
                 time = newItem.time,
+                date = newItem.date,
                 title = newItem.title,
                 subtitle = newItem.subtitle,
                 isCompleted = false,
@@ -643,7 +651,8 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
         _uiState.value = _uiState.value.copy(
             itinerary = list,
             nextMeetingTitle = nextItem?.title,
-            nextMeetingTime = nextItem?.time
+            nextMeetingTime = nextItem?.time,
+            nextMeetingDate = nextItem?.date
         )
     }
 

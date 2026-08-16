@@ -1,6 +1,7 @@
 package com.voxa.app.ui.screens
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -29,10 +30,13 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewModelScope
 import com.voxa.app.R
 import com.voxa.app.ui.components.VoxaBackgroundShader
 import com.voxa.app.ui.theme.VoxaTheme
 import com.voxa.app.ui.viewmodel.VoxaViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun OnboardingScreen(
@@ -42,10 +46,12 @@ fun OnboardingScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
-    val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
-    } else {
-        arrayOf(Manifest.permission.RECORD_AUDIO)
+    val permissionsToRequest = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            arrayOf(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     val launcher = rememberLauncherForActivityResult(
@@ -53,7 +59,20 @@ fun OnboardingScreen(
     ) { permissions ->
         val isMicGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
         if (isMicGranted) {
-            viewModel.grantMicPermission()
+            // SEQUENTIAL FLOW: Wait for system UI to settle before asking for Overlay
+            viewModel.viewModelScope.launch {
+                delay(800)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(context)) {
+                    try {
+                        val intent = Intent(
+                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            android.net.Uri.parse("package:${context.packageName}")
+                        )
+                        context.startActivity(intent)
+                    } catch (_: Exception) {}
+                }
+                viewModel.grantMicPermission()
+            }
         }
     }
 
@@ -127,13 +146,17 @@ fun LogoSection() {
 @Composable
 fun OnboardingCard(onGrantAccess: () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFF1A1C1E), // Solid Opaque Background (No transparency)
+        shape = RoundedCornerShape(28.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 48.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), RoundedCornerShape(24.dp)),
-        shadowElevation = 8.dp
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(28.dp)
+            ),
+        shadowElevation = 0.dp // Removed standard shadow to keep it clean
     ) {
         Column(
             modifier = Modifier.padding(24.dp),
@@ -173,7 +196,7 @@ fun OnboardingCard(onGrantAccess: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Voxa needs microphone access to hear your commands and provide an immersive voice experience.",
+                text = "Voxa needs microphone access to hear your commands. For reliable alarms, please also manually enable 'Auto-Launch' or 'App Launch' in your phone's app settings.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -198,18 +221,6 @@ fun OnboardingCard(onGrantAccess: () -> Unit) {
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.5.sp
-                )
-            }
-
-            TextButton(
-                onClick = { /* Handle Later */ },
-                modifier = Modifier.padding(top = 8.dp)
-            ) {
-                Text(
-                    text = "MAYBE LATER",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 1.sp
                 )
             }
         }

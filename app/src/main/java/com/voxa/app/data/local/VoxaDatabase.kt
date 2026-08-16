@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import com.voxa.app.data.local.dao.ItineraryDao
 import com.voxa.app.data.local.entity.ItineraryEntity
 
-@Database(entities = [ItineraryEntity::class], version = 1, exportSchema = false)
+@Database(entities = [ItineraryEntity::class], version = 2, exportSchema = false)
 abstract class VoxaDatabase : RoomDatabase() {
     abstract fun itineraryDao(): ItineraryDao
 

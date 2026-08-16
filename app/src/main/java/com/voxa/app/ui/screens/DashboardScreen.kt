@@ -20,9 +20,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -89,6 +91,7 @@ fun DashboardScreenContent(
                     NextMeetingCard(
                         title = title,
                         time = uiState.nextMeetingTime ?: "",
+                        date = uiState.nextMeetingDate ?: "",
                         countdown = uiState.countdown
                     )
                     Spacer(modifier = Modifier.height(32.dp))
@@ -198,7 +201,7 @@ fun GreetingSection(taskCount: Int) {
 }
 
 @Composable
-fun NextMeetingCard(title: String, time: String, countdown: String) {
+fun NextMeetingCard(title: String, time: String, date: String, countdown: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -206,15 +209,6 @@ fun NextMeetingCard(title: String, time: String, countdown: String) {
             .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
             .padding(24.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 20.dp, y = (-20).dp)
-                .size(100.dp)
-                .blur(40.dp)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), CircleShape)
-        )
-
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -229,6 +223,15 @@ fun NextMeetingCard(title: String, time: String, countdown: String) {
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold
                 )
+                
+                if (date.isNotEmpty()) {
+                    Text(
+                        text = date,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         Icons.Default.Schedule,
@@ -290,41 +293,49 @@ fun ItinerarySection(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items.forEach { item ->
-                    val dismissState = rememberSwipeToDismissBoxState(
-                        confirmValueChange = {
-                            if (it == SwipeToDismissBoxValue.EndToStart) {
-                                onDelete(item.id)
-                                true
-                            } else false
-                        }
-                    )
-
-                    SwipeToDismissBox(
-                        state = dismissState,
-                        enableDismissFromStartToEnd = false,
-                        backgroundContent = {
-                            val color by animateColorAsState(
-                                when (dismissState.targetValue) {
-                                    SwipeToDismissBoxValue.EndToStart -> Color(0xFFFF4B4B).copy(alpha = 0.2f)
-                                    else -> Color.Transparent
-                                }, label = "bg_color"
-                            )
-
-                            Box(
-                                Modifier
-                                    .fillMaxSize()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(color)
-                                    .padding(horizontal = 20.dp),
-                                contentAlignment = Alignment.CenterEnd
-                            ) {
-                                // Delete icon removed as requested
+                    // CRITICAL: Using key ensures the state is tied to the ID, preventing "Sticking"
+                    key(item.id) {
+                        val dismissState = rememberSwipeToDismissBoxState(
+                            confirmValueChange = {
+                                if (it == SwipeToDismissBoxValue.EndToStart) {
+                                    onDelete(item.id)
+                                    true
+                                } else false
                             }
-                        },
-                        content = {
-                            ItineraryItemRow(item)
-                        }
-                    )
+                        )
+
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            enableDismissFromStartToEnd = false,
+                            backgroundContent = {
+                                val color by animateColorAsState(
+                                    when (dismissState.targetValue) {
+                                        SwipeToDismissBoxValue.EndToStart -> Color(0xFFFF4B4B).copy(alpha = 0.2f)
+                                        else -> Color.Transparent
+                                    }, label = "bg_color"
+                                )
+
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(color)
+                                        .padding(horizontal = 20.dp),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Delete",
+                                        tint = Color(0xFFFF4B4B),
+                                        modifier = Modifier.scale(if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) 1.2f else 1f)
+                                    )
+                                }
+                            },
+                            content = {
+                                ItineraryItemRow(item)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -337,12 +348,25 @@ fun ItineraryItemRow(item: ItineraryItem) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally, 
+            modifier = Modifier.width(72.dp).padding(top = 4.dp)
+        ) {
             Text(
                 text = item.time,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (item.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (item.isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
             )
+            if (item.date.isNotEmpty()) {
+                Text(
+                    text = item.date,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
         Box(
             modifier = Modifier

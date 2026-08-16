@@ -6,8 +6,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -21,7 +20,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.voxa.app.ui.theme.VoxaTheme
 import com.voxa.app.ui.viewmodel.AssistantState
 
 private const val BACKGROUND_SHADER_SRC = """
@@ -45,8 +46,8 @@ private const val BACKGROUND_SHADER_SRC = """
         
         vec3 obsidian = vec3(0.043, 0.047, 0.063);
         
-        // Dynamic intensity based on state color and volume
-        float intensity = glow * (0.25 + uVolume * 0.15);
+        // Dynamic intensity based on state color and volume - BOOSTED
+        float intensity = glow * (0.45 + uVolume * 0.25);
         vec3 color = mix(obsidian, uColor, intensity);
         
         // Subtle moving noise/waves in the background wash
@@ -68,28 +69,25 @@ private const val ORB_SHADER_SRC = """
         vec2 uv = (fragCoord - 0.5 * uResolution) / min(uResolution.x, uResolution.y);
         float d = length(uv);
         
-        float baseRadius = 0.2;
-        if (uState == 0.0) baseRadius += uVolume * 0.25;
-        if (uState == 1.0) baseRadius += sin(uTime * 4.0) * 0.05;
+        // Multi-frequency noise for "Energy Nebula" feel (Not a solid bulb)
+        float noise = sin(uv.x * 5.0 + uTime * 1.5) * 0.04 + 
+                      cos(uv.y * 7.0 - uTime * 1.2) * 0.04 +
+                      sin((uv.x + uv.y) * 12.0 + uTime * 2.0) * 0.02;
         
-        float speed = (uState == 1.0) ? 6.0 : 2.5;
-        float strength = (uState == 1.0) ? 0.1 : 0.05;
-        
-        float noise = sin(uv.x * 10.0 + uTime * speed) * strength +
-                      cos(uv.y * 8.0 - uTime * speed * 0.8) * strength;
-        
+        float baseRadius = (uState == 1.0) ? 0.2 : 0.15 + uVolume * 0.4;
         float dist = d - (baseRadius + noise);
         
-        float glow = exp(-dist * 2.0); 
-        float core = 1.0 - smoothstep(0.0, 0.02, dist);
+        // Pure spectral falloff (No hard core edges)
+        float glow = exp(-dist * 8.0); 
+        float aura = exp(-dist * 3.0);
         
-        vec3 obsidian = vec3(0.043, 0.047, 0.063);
-        vec3 color = mix(obsidian, uColor, (glow * 2.0) + (core * 1.2));
+        // Color mixing: Use the primary color for the aura and a slightly
+        // brighter version for the energy center, but avoid pure white.
+        vec3 energyColor = mix(uColor, vec3(1.0, 1.0, 1.0), 0.4);
+        vec3 color = uColor * aura + energyColor * glow;
         
-        float highlight = pow(max(0.0, 1.0 - length(uv - vec2(0.12, 0.12))), 8.0);
-        color += uColor * highlight * 0.6;
-        
-        float finalAlpha = clamp(core + (glow * 0.8), 0.0, 1.0);
+        // Final alpha blend
+        float finalAlpha = clamp(glow * 0.9 + aura * 0.1, 0.0, 1.0);
         
         return half4(color, finalAlpha);
     }
@@ -137,15 +135,23 @@ fun VoxaBackgroundShader(
     state: AssistantState = AssistantState.IDLE,
     volume: Float = 0f
 ) {
+    val stateColor = when (state) {
+        AssistantState.LISTENING -> Color(0xFF00FFCC)
+        AssistantState.THINKING -> Color(0xFFC6BFFF)
+        AssistantState.PROCESSING -> Color(0xFF24FFCD)
+        else -> Color(0xFF00FFCC)
+    }
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         VoxaBackgroundShaderTiramisu(modifier, state, volume)
     } else {
-        val infiniteTransition = rememberInfiniteTransition(label = "background_fallback")
+        // BEAUTIFUL FALLBACK FOR ANDROID 12 AND BELOW
+        val infiniteTransition = rememberInfiniteTransition(label = "bg_fallback")
         val pulseScale by infiniteTransition.animateFloat(
-            initialValue = 0.8f,
-            targetValue = 1.2f,
+            initialValue = 0.7f,
+            targetValue = 1.3f,
             animationSpec = infiniteRepeatable(
-                animation = tween(4000, easing = EaseInOutSine),
+                animation = tween(5000, easing = EaseInOutSine),
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "pulse"
@@ -154,16 +160,29 @@ fun VoxaBackgroundShader(
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(Color(0xFF0B0C10))
-                .drawWithCache {
-                    val brush = androidx.compose.ui.graphics.Brush.radialGradient(
-                        colors = listOf(Color(0xFF00FFCC).copy(alpha = 0.15f * pulseScale), Color.Transparent),
+                .background(Color(0xFF0B0C10)) // Deep Obsidian base
+                .drawBehind {
+                    // Multi-layered gradient to mimic AGSL depth - BOOSTED ALPHA
+                    val centerGlow = androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(
+                            stateColor.copy(alpha = 0.45f * (0.8f + volume * 0.2f)), 
+                            stateColor.copy(alpha = 0.15f), 
+                            Color.Transparent
+                        ),
                         center = Offset(size.width / 2f, size.height / 2f),
-                        radius = size.minDimension * 0.8f * pulseScale
+                        radius = size.minDimension * pulseScale
                     )
-                    onDrawBehind {
-                        drawRect(brush)
-                    }
+                    drawRect(centerGlow)
+                    
+                    // Top-left subtle light leak
+                    drawCircle(
+                        brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                            colors = listOf(stateColor.copy(alpha = 0.08f), Color.Transparent),
+                            radius = size.maxDimension * 0.5f
+                        ),
+                        center = Offset(0f, 0f),
+                        radius = size.maxDimension * 0.5f
+                    )
                 }
         )
     }
@@ -175,32 +194,34 @@ fun VoxaVoiceOrbShader(
     state: AssistantState = AssistantState.IDLE,
     volume: Float = 0f
 ) {
+    val stateColor = when (state) {
+        AssistantState.LISTENING -> Color(0xFF00FFCC)
+        AssistantState.THINKING -> Color(0xFFC6BFFF)
+        AssistantState.PROCESSING -> Color(0xFF24FFCD)
+        else -> Color(0xFF00FFCC)
+    }
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         VoxaVoiceOrbShaderTiramisu(modifier, state, volume)
     } else {
+        // HIGH-QUALITY FALLBACK TO MATCH AGSL DEPTH
         val infiniteTransition = rememberInfiniteTransition(label = "orb_fallback")
-        val stateColor = when (state) {
-            AssistantState.LISTENING -> Color(0xFF00FFCC)
-            AssistantState.THINKING -> Color(0xFFC6BFFF)
-            AssistantState.PROCESSING -> Color(0xFF24FFCD)
-            else -> Color(0xFF00FFCC)
-        }
         
         val scale by infiniteTransition.animateFloat(
-            initialValue = 0.9f,
-            targetValue = 1.1f,
+            initialValue = 0.85f,
+            targetValue = 1.05f,
             animationSpec = infiniteRepeatable(
-                animation = tween(2000, easing = EaseInOutSine),
+                animation = tween(2500, easing = EaseInOutSine),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "scale"
         )
         
         val alpha by infiniteTransition.animateFloat(
-            initialValue = 0.5f,
-            targetValue = 1.0f,
+            initialValue = 0.4f,
+            targetValue = 0.8f,
             animationSpec = infiniteRepeatable(
-                animation = tween(1000, easing = EaseInOutSine),
+                animation = tween(1500, easing = EaseInOutSine),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "alpha"
@@ -208,17 +229,44 @@ fun VoxaVoiceOrbShader(
 
         Box(
             modifier = modifier
+                .fillMaxSize()
                 .graphicsLayer {
-                    val volumeScale = 1f + (volume * 0.4f)
+                    val volumeScale = 1f + (volume * 0.35f)
                     scaleX = scale * volumeScale
                     scaleY = scale * volumeScale
                 }
-                .background(
-                    androidx.compose.ui.graphics.Brush.radialGradient(
-                        colors = listOf(stateColor.copy(alpha = 0.6f * alpha), stateColor.copy(alpha = 0f)),
-                    ),
-                    shape = androidx.compose.foundation.shape.CircleShape
-                )
+                .drawBehind {
+                    // NEBULA FALLBACK: Soft energy field (Not a solid bulb)
+                    // 1. Energy Center (Brighter but not pure white)
+                    val centerColor = Color(
+                        red = (stateColor.red + 1f) / 2f,
+                        green = (stateColor.green + 1f) / 2f,
+                        blue = (stateColor.blue + 1f) / 2f,
+                        alpha = 0.8f * alpha
+                    )
+                    
+                    drawCircle(
+                        brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                            0.0f to centerColor,
+                            0.4f to stateColor.copy(alpha = 0.4f * alpha),
+                            1.0f to Color.Transparent,
+                            center = center,
+                            radius = size.minDimension / 2.5f
+                        ),
+                        radius = size.minDimension / 2.5f
+                    )
+                    
+                    // 2. Diffuse Ambient Aura
+                    drawCircle(
+                        brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                            0.0f to stateColor.copy(alpha = 0.12f * alpha),
+                            1.0f to Color.Transparent,
+                            center = center,
+                            radius = size.minDimension / 1.2f
+                        ),
+                        radius = size.minDimension / 1.2f
+                    )
+                }
         )
     }
 }
@@ -229,51 +277,70 @@ fun VoxaWaveformShader(
     state: AssistantState = AssistantState.IDLE,
     volume: Float = 0f
 ) {
+    val stateColor = when (state) {
+        AssistantState.LISTENING -> Color(0xFF00FFCC)
+        AssistantState.THINKING -> Color(0xFFC6BFFF)
+        AssistantState.PROCESSING -> Color(0xFF24FFCD)
+        else -> Color(0xFF00FFCC)
+    }
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         VoxaWaveformShaderTiramisu(modifier, state, volume)
     } else {
+        // UNIVERSAL HIGH-QUALITY WAVEFORM FALLBACK
         val infiniteTransition = rememberInfiniteTransition(label = "waveform_fallback")
         val time by infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 6.28f,
             animationSpec = infiniteRepeatable(
-                animation = tween(1000, easing = LinearEasing),
+                animation = tween(1500, easing = LinearEasing),
                 repeatMode = RepeatMode.Restart
             ),
             label = "time"
         )
-        
-        val stateColor = when (state) {
-            AssistantState.LISTENING -> Color(0xFF00FFCC)
-            AssistantState.THINKING -> Color(0xFFC6BFFF)
-            AssistantState.PROCESSING -> Color(0xFF24FFCD)
-            else -> Color(0xFF00FFCC)
-        }
 
         Canvas(modifier = modifier.fillMaxSize()) {
             val width = size.width
             val height = size.height
             val centerY = height / 2f
             
-            for (i in 0..2) {
+            // Draw 5 overlapping waves with different properties for "Electric" feel
+            for (i in 0..4) {
                 val path = Path()
-                val freq = 1.5f + i * 0.5f
-                val amp = (10.dp.toPx() + volume * 20.dp.toPx()) / (1 + i)
+                val freq = 1.2f + (i * 0.4f)
+                val speed = time * (1f + (i * 0.2f))
+                
+                // Volume responsive amplitude
+                val baseAmp = (15.dp.toPx() + volume * 40.dp.toPx())
+                val amp = baseAmp / (1 + i * 0.5f)
                 
                 path.moveTo(0f, centerY)
-                for (x in 0..width.toInt() step 5) {
-                    val x_f = x.toFloat()
-                    val normalizedX = x_f / width
-                    val envelope = kotlin.math.sin(normalizedX * 3.14159f)
-                    val y = centerY + kotlin.math.sin(normalizedX * freq * 6.28f + time + i) * amp * envelope
-                    path.lineTo(x_f, y)
+                
+                // Draw wave with envelope (fades at start/end)
+                for (x in 0..width.toInt() step 4) {
+                    val xf = x.toFloat()
+                    val normX = xf / width
+                    val envelope = kotlin.math.sin(normX * 3.14159f) // Gaussian-like fade
+                    
+                    val y = centerY + kotlin.math.sin(normX * freq * 6.28f + speed) * amp * envelope
+                    path.lineTo(xf, y)
                 }
                 
+                // Draw the main path
                 drawPath(
                     path = path,
-                    color = stateColor.copy(alpha = 0.6f / (i + 1)),
-                    style = Stroke(width = 2.dp.toPx())
+                    color = stateColor.copy(alpha = 0.5f / (i + 1)),
+                    style = Stroke(width = (2.dp.toPx() - i * 0.3f).coerceAtLeast(1f))
                 )
+                
+                // Add a glow effect for the first few waves
+                if (i < 2) {
+                    drawPath(
+                        path = path,
+                        color = stateColor.copy(alpha = 0.1f),
+                        style = Stroke(width = 8.dp.toPx())
+                    )
+                }
             }
         }
     }
@@ -294,7 +361,6 @@ private fun VoxaBackgroundShaderTiramisu(
         }
     }
 
-    // Use a top-level or static-like reference for RuntimeShader to avoid compilation lag
     val shader = remember { 
         VoxaShaderCache.getBackgroundShader()
     }
@@ -319,7 +385,16 @@ private fun VoxaBackgroundShaderTiramisu(
                 }
         )
     } else {
-        Box(modifier = modifier.fillMaxSize().background(Color(0xFF0B0C10)))
+        // SAFE FALLBACK IF SHADER COMPILATION FAILS ON TIRAMISU DEVICES
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(
+                    androidx.compose.ui.graphics.Brush.radialGradient(
+                        colors = listOf(stateColor.copy(alpha = 0.2f), Color(0xFF0B0C10)),
+                    )
+                )
+        )
     }
 }
 
@@ -448,5 +523,35 @@ object VoxaShaderCache {
             try { waveformShader = RuntimeShader(WAVEFORM_SHADER_SRC) } catch (e: Exception) {}
         }
         return waveformShader
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0B0C10)
+@Composable
+fun VoxaShadersPreview() {
+    VoxaTheme {
+        Box(modifier = Modifier.fillMaxSize()) {
+            VoxaBackgroundShader(state = AssistantState.LISTENING, volume = 0.5f)
+            
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+            ) {
+                VoxaVoiceOrbShader(
+                    modifier = Modifier.size(200.dp),
+                    state = AssistantState.LISTENING,
+                    volume = 0.5f
+                )
+                
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(50.dp))
+                
+                VoxaWaveformShader(
+                    modifier = Modifier.fillMaxWidth().height(100.dp),
+                    state = AssistantState.LISTENING,
+                    volume = 0.8f
+                )
+            }
+        }
     }
 }
