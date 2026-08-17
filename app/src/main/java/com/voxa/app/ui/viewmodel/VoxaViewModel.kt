@@ -252,14 +252,14 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
                 getApplication(),
                 itemId,
                 intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
             )
         } else {
             PendingIntent.getService(
                 getApplication(),
                 itemId,
                 intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
             )
         }
         
