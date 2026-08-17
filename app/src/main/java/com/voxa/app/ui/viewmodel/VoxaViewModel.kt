@@ -94,7 +94,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
 
     private var speechRecognizer: SpeechRecognizer? = null
     private val generativeModel = GenerativeModel(
-        modelName = "gemini-3.1-flash-lite",
+        modelName = "gemini-3.5-flash-lite",
         apiKey = BuildConfig.GEMINI_API_KEY,
         generationConfig = generationConfig {
             temperature = 0.1f
@@ -103,23 +103,40 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
         }
     )
 
-    private val systemPrompt = """
-        You are a highly capable scheduling assistant. The user will speak in English, Urdu, or Roman Urdu.
-        Your tasks:
-        1. Translate and Refine: Convert the user's input into a clean, professional English sentence (e.g., "I want to meet Sarah tomorrow at 2" -> "Schedule a meeting with Sarah tomorrow at 2:00 PM").
-        2. Extract Data: Provide a JSON object with:
-           - "refinedText": The clean English version.
-           - "title": A concise title for the event (e.g., "Meeting with Sarah").
-           - "date": Date in "d MMM, yyyy" format.
-           - "time": Time in "hh:mm AM/PM" format.
-           - "leadTime": Alert lead time in minutes (default 0).
+    private fun getSystemPrompt(): String {
+        val now = Calendar.getInstance()
+        val day = now.get(Calendar.DAY_OF_MONTH)
+        val month = now.getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.getDefault())
+        val year = now.get(Calendar.YEAR)
+        val hour24 = now.get(Calendar.HOUR_OF_DAY)
+        val hour12 = if (hour24 % 12 == 0) 12 else hour24 % 12
+        val minute = now.get(Calendar.MINUTE)
+        val amPm = if (hour24 < 12) "AM" else "PM"
 
-        If the user doesn't specify a time or date, use:
-        - Date: "${Calendar.getInstance().get(Calendar.DAY_OF_MONTH)} ${Calendar.getInstance().getDisplayName(Calendar.MONTH, Calendar.SHORT, Locale.getDefault())}, ${Calendar.getInstance().get(Calendar.YEAR)}"
-        - Time: "${String.format(Locale.getDefault(), "%02d:%02d %s", if (Calendar.getInstance().get(Calendar.HOUR_OF_DAY) % 12 == 0) 12 else Calendar.getInstance().get(Calendar.HOUR_OF_DAY) % 12, Calendar.getInstance().get(Calendar.MINUTE), if (Calendar.getInstance().get(Calendar.HOUR_OF_DAY) < 12) "AM" else "PM")}"
+        val currentDate = "$day $month, $year"
+        val currentTime = String.format(Locale.getDefault(), "%02d:%02d %s", hour12, minute, amPm)
 
-        Return ONLY the JSON object.
-    """.trimIndent()
+        return """
+            You are a highly capable scheduling assistant. The user will speak in English, Urdu, or Roman Urdu.
+            
+            REFERENCE TIME (NOW):
+            - Date: $currentDate
+            - Time: $currentTime
+
+            YOUR TASKS:
+            1. Calculate Exact Time: If the user says "in 5 minutes", "after 2 hours", "aadhe ghante baad", or "kal issi waqt", calculate the EXACT date and time based on the REFERENCE TIME provided above.
+            2. Translate and Refine: Convert the user's input into a clean, professional English sentence.
+            3. Extract Data: Provide a JSON object with:
+               - "refinedText": The clean English version (e.g., "Schedule a meeting in 30 minutes").
+               - "title": A concise title (e.g., "Meeting").
+               - "date": Calculated Date in "d MMM, yyyy" format.
+               - "time": Calculated Time in "hh:mm AM/PM" format.
+               - "leadTime": Alert lead time in minutes (default 0).
+
+            If no specific time is mentioned, default to the REFERENCE TIME.
+            Return ONLY the JSON object.
+        """.trimIndent()
+    }
 
     private val notificationsEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("notifications_enabled")
     private val hapticEnabledKey = androidx.datastore.preferences.core.booleanPreferencesKey("haptic_enabled")
@@ -417,7 +434,7 @@ class VoxaViewModel(application: android.app.Application) : androidx.lifecycle.A
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(assistantState = AssistantState.THINKING)
             try {
-                val response = generativeModel.generateContent("$systemPrompt\n\nUser Input: \"$userInput\"")
+                val response = generativeModel.generateContent("${getSystemPrompt()}\n\nUser Input: \"$userInput\"")
                 val jsonString = response.text ?: "{}"
                 
                 val refinedText = extractJsonValue(jsonString, "refinedText")
